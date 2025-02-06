@@ -288,14 +288,15 @@ class EgoHandsDataset(Dataset):
         self.mask_shape = mask_shape
         self.image_paths, self.mask_poly = self._get_paths()
 
+
     def _compute_mask(self, polygons, height, width):
         mask = Image.new('L', (width, height), 0)
         for poly in polygons:
             ImageDraw.Draw(mask).polygon(poly, outline=255, fill=255)
         return mask
 
-    def _get_paths(self):
 
+    def _get_paths(self):
         annotations = self.metadata['video'][0] # 48 annotations (of the 48 videos)
         image_paths = []
         masks_poly = []

@@ -7,3 +7,12 @@ C06/template/
 
 handwritten/resources
 handwritten/results
+
+IQ007/resources
+# IQ007/hands-segmentation-pytorch
+IQ007/__pycache__
+
+*/__pycache__
+
+.vscode
+
