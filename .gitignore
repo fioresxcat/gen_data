@@ -11,8 +11,13 @@ handwritten/results
 IQ007/resources
 # IQ007/hands-segmentation-pytorch
 IQ007/__pycache__
+IQ007/test*.png
+IQ007/test*.jpg
 
 */__pycache__
 
 .vscode
+results
+resources
+hands-segmentation-pytorch
 

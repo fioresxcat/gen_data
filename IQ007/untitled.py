@@ -1,4 +1,5 @@
 from utils import *
+from torchvision import transforms
 
 
 class ElevenkHands:
@@ -132,12 +133,13 @@ class EgoHand:
     
     @staticmethod
     def get_hand_images():
-        output_dir = 'resources/egohands_data/hands_segmented'
+        output_dir = 'resources/egohands_data/hands_segmented_filtered'
         os.makedirs(output_dir, exist_ok=True)
 
         with open('resources/egohands_data/new_annos.json') as f:
             annos = json.load(f)
         
+        cnt = 0
         for fn, polygons in annos.items():
             video_id, frame_id = fn.split('-')
             frame_name = 'frame_{:04d}.jpg'.format(int(frame_id))
@@ -168,14 +170,21 @@ class EgoHand:
 
                 # Find bounding box of the polygon
                 x, y, w, h = cv2.boundingRect(poly_np)
+                pos = 'upper' if y < transparent.shape[0] // 2 else 'lower'
 
                 # Crop the region of interest
                 cropped = transparent[y:y+h, x:x+w]
+                if max(w/h, h/w) > 2:
+                    continue
+                if (h*w) / (im.shape[0]*im.shape[1]) < 0.05:
+                    continue 
 
                 # Save as PNG with transparency
                 output_path = os.path.join(output_dir, f"{video_id}-{frame_name}-{i}.png")
                 cv2.imwrite(output_path, cropped)
-                print(f"Saved: {output_path}")
+                cnt += 1
+                print(f"Saved: {output_path}, {cnt} hands so far")
+
 
 
 
@@ -267,18 +276,203 @@ class COCO:
                 continue
 
 
+def segment_fingers():
+    dir = 'resources/11k_hands-transparent_cropped'
+    # dir = 'resources/11k_hands-temp'
+    out_dir = 'resources/11k_hands-fingers'
+    os.makedirs(out_dir, exist_ok=True)
+
+    for ip in Path(dir).glob('*.png'):
+        try:
+            # if 'Hand_0011555-down-left' not in ip.name:
+            #     continue
+            # Load image with alpha channel (RGBA)
+            img = cv2.imread(str(ip), cv2.IMREAD_UNCHANGED)
+            im_h, im_w = img.shape[:2]
+            
+            # Extract alpha channel (transparency mask)
+            if img.shape[2] == 4:
+                hand_mask = img[:, :, 3]  # Alpha channel as mask
+            else:
+                raise ValueError("Image does not have an alpha channel!")
+
+            # Convert mask to binary
+            _, binary = cv2.threshold(hand_mask, 128, 255, cv2.THRESH_BINARY)
+
+            # Find contours of the hand
+            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not contours:
+                raise ValueError("No hand contour found!")
+            
+            hand_contour = max(contours, key=cv2.contourArea)  # Get the largest contour
+
+            # Find convex hull and defects
+            hull = cv2.convexHull(hand_contour, returnPoints=False)
+            defects = cv2.convexityDefects(hand_contour, hull)
+
+            # Prepare an output image
+            output = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
+            # Find finger tips using convex hull
+            hull_points = [hand_contour[i[0]] for i in hull]
+            hull_points = np.array(hull_points, dtype=np.int32)
+
+            # Draw convex hull
+            # cv2.drawContours(output, [hull_points], -1, (0, 255, 0), 2)
+
+            # Process convexity defects to segment fingers
+            fingers = []
+            far_points = []
+            valid_finger_cnt = 0
+            if defects is not None:
+                for i in range(defects.shape[0]):
+                    start_idx, end_idx, far_idx, _ = defects[i, 0]
+                    start = tuple(hand_contour[start_idx][0])
+                    end = tuple(hand_contour[end_idx][0])
+                    far = tuple(hand_contour[far_idx][0])
+
+                    # Filter defects based on distance (removes noise)
+                    if cv2.norm(np.array(start) - np.array(far)) > 20 and cv2.norm(np.array(end) - np.array(far)) > 20:
+                        fingers.append((start, end))
+
+                        # Draw fingers (segments)
+                        cv2.circle(output, start, 5, (255, 0, 0), -1)
+                        cv2.circle(output, end, 5, (255, 0, 0), -1)
+                        cv2.circle(output, far, 5, (0, 0, 255), -1)
+                        cv2.line(output, start, end, (255, 255, 0), 2)
+
+                        far_points.append(far)
+                        finger_ymax = max(start[1], end[1])
+                        finger_ymin = far[1]
+                        if 0.6 * im_h >= finger_ymax - finger_ymin >= im_h // 3:
+                            valid_finger_cnt += 1
+            
+            if valid_finger_cnt >= 3:
+                print('Image valid, splitting ...')
+                far_points.sort(key=lambda x: x[0])
+                transparent_im = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+                for i in range(len(far_points)-1):
+                    pt1 = far_points[i]
+                    pt2 = far_points[i+1]
+                    xmin = pt1[0]
+                    xmax = pt2[0]
+                    ymin = min(pt1[1], pt2[1])
+                    ymax = im_h
+                    finger_crop = transparent_im[ymin:ymax, xmin:xmax]
+                    finger_bb = get_largest_foreground_region(finger_crop)
+                    finger_crop = finger_crop[finger_bb[1]:finger_bb[3], finger_bb[0]:finger_bb[2]]
+                    finger_h, finger_w = finger_crop.shape[:2]
+                    if finger_h/finger_w < 2 or finger_h/finger_w > 8:
+                        continue
+                    if min(finger_crop.shape[:2]) < 50:
+                        print(f'Finger too small, skipping ...')
+                        continue
+                    save_name = f'{ip.stem}-finger_{i}.png'
+                    cv2.imwrite(os.path.join(out_dir, save_name), finger_crop)
+                    print(f'done {save_name}')
+            else:
+                print('Image not valid')
+
+        except Exception as e:
+            print('ERROR: ', e)
+            continue
+
+def segment_and_crop_fingers(image_path, output_folder="fingers_output"):
+    # Load image with alpha channel (RGBA)
+    img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+
+    # Ensure image has an alpha channel
+    if img.shape[2] != 4:
+        raise ValueError("Image does not have an alpha channel!")
+
+    # Extract the alpha channel (hand mask)
+    hand_mask = img[:, :, 3]
+
+    # Convert mask to binary
+    _, binary = cv2.threshold(hand_mask, 128, 255, cv2.THRESH_BINARY)
+
+    # Find contours of the hand
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        raise ValueError("No hand contour found!")
+
+    hand_contour = max(contours, key=cv2.contourArea)  # Get the largest contour (hand)
+
+    # Find convex hull and defects
+    hull = cv2.convexHull(hand_contour, returnPoints=False)
+    defects = cv2.convexityDefects(hand_contour, hull)
+
+    if defects is None:
+        raise ValueError("No convexity defects found. Ensure fingers are separated!")
+
+    # Prepare an output directory
+    os.makedirs(output_folder, exist_ok=True)
+
+    # Extract finger segments using convexity defects
+    finger_masks = np.zeros_like(binary)
+    finger_contours = []
+
+    for i in range(defects.shape[0]):
+        start_idx, end_idx, far_idx, _ = defects[i, 0]
+        start = tuple(hand_contour[start_idx][0])
+        end = tuple(hand_contour[end_idx][0])
+        far = tuple(hand_contour[far_idx][0])
+
+        # Filtering defects (only consider wide gaps)
+        if cv2.norm(np.array(start) - np.array(far)) > 20 and cv2.norm(np.array(end) - np.array(far)) > 20:
+            # Create a new mask for the individual finger
+            single_finger_mask = np.zeros_like(binary)
+
+            # Draw filled contour of the hand
+            cv2.drawContours(single_finger_mask, [hand_contour], -1, 255, thickness=cv2.FILLED)
+
+            # Block out the region below the finger (to isolate it)
+            cv2.line(single_finger_mask, start, end, 0, thickness=20)
+
+            # Find contours in this new mask (extract just one finger)
+            finger_contour, _ = cv2.findContours(single_finger_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if finger_contour:
+                finger_contours.append(max(finger_contour, key=cv2.contourArea))  # Get largest finger contour
+
+    # Process each detected finger
+    for idx, finger_contour in enumerate(finger_contours):
+        # Create a mask for this specific finger
+        finger_mask = np.zeros_like(binary)
+        cv2.drawContours(finger_mask, [finger_contour], -1, 255, thickness=cv2.FILLED)
+
+        # Extract the specific finger region
+        finger_only = cv2.bitwise_and(img, img, mask=finger_mask)
+
+        # Get bounding box of the finger
+        x, y, w, h = cv2.boundingRect(finger_contour)
+
+        # Crop to bounding box
+        cropped_finger = finger_only[y:y+h, x:x+w]
+
+        # Save the cropped finger with transparency
+        output_filename = os.path.join(output_folder, f"finger_{idx+1}.png")
+        cv2.imwrite(output_filename, cropped_finger)
+
+        print(f"Saved {output_filename}")
+
+    print("Finger segmentation completed!")
 
 
 
 def nothing():
-    for jp in Path('/data/tungtx2/gen_data/IQ007/resources/egohands_data/_LABELLED_SAMPLES').rglob('*.json'):
-        os.remove(jp)
+    dir = 'resources/coco2017/coco_objects'
+    ipaths = list(Path(dir).glob('*'))
+    for _ in range(100): np.random.shuffle(ipaths)
+    for ip in ipaths[:100]:
+        shutil.copy(ip, 'resources/coco2017/coco_objects_temp')
+        print(f'done {ip}')
     
 
 if __name__ == '__main__':
     pass
     # nothing()
-    ElevenkHands.get_hand_roi_images()
+    # ElevenkHands.get_hand_roi_images()
     # EgoHand.get_labels()
     # EgoHand.get_hand_images()
     # COCO.get_object_images()
+    segment_fingers()
