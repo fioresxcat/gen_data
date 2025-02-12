@@ -406,10 +406,11 @@ def filter_coco_objects():
 
 
 def nothing():
-    ip = Path('/home/fiores/Desktop/VNG/gen_data/IQ007/resources/11k_hands-temp/Hand_0000002-down-right.png')
+    ip = Path('/home/fiores/Desktop/VNG/gen_data/IQ007/resources/11k_hands-temp/Hand_0000038.jpg')
     jp = ip.with_suffix('.json')
 
     im = cv2.imread(str(ip), cv2.IMREAD_UNCHANGED)
+    im = cv2.cvtColor(im, cv2.COLOR_BGR2BGRA)
     with open(jp) as f:
         data = json.load(f)
     
@@ -430,6 +431,7 @@ def nothing():
         # Find bounding box and crop
         x, y, w, h = cv2.boundingRect(mask)
         crop = transparent[y:y+h, x:x+w]
+        # crop = im[y:y+h, x:x+w]
 
         # make all bg white
         crop = cv2.cvtColor(crop, cv2.COLOR_BGRA2RGBA)
