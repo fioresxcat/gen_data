@@ -468,15 +468,39 @@ def nothing():
         print(f'done finger {i}')
 
 
+def sample_11k_hands_data():
+    out_dir = 'resources/11k_hands-sample'
+    os.makedirs(out_dir, exist_ok=True)
+    with open('resources/11k_hands-info.txt') as f:
+        lines = [line.strip() for line in f.readlines()]
+    list_ids = []
+    for line in lines[1:]:
+        id = line.strip().split(',')[0]
+        if id not in list_ids:
+            list_ids.append(id)
+    print('num people: ', len(list_ids))
+    pdb.set_trace()
+
+    im_dir = 'resources/11k_hands'
+    for id in list_ids:
+        hand_type = 'dorsal' if np.random.rand() < 0.75 else 'palmar'
+        cand_lines = [line for line in lines if line.strip().split(',')[0] == id and hand_type in line]
+        if len(cand_lines) == 0: continue
+        line = np.random.choice(cand_lines)
+        im_name = line.split(',')[-2]
+        shutil.copy(os.path.join(im_dir, im_name), os.path.join(out_dir, f'{id}-{im_name[:-4]}.jpg'))
+        print(f'done {im_name}')
+
 
 
 
 if __name__ == '__main__':
     pass
-    nothing()
+    # nothing()
     # ElevenkHands.get_hand_roi_images()
     # EgoHand.get_labels()
     # EgoHand.get_hand_images()
     # COCO.get_object_images()
     # segment_fingers()
     # filter_coco_objects()
+    sample_11k_hands_data()
