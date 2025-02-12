@@ -405,13 +405,76 @@ def filter_coco_objects():
     print(f'removed {cnt} images')
 
 
+def nothing():
+    ip = Path('/home/fiores/Desktop/VNG/gen_data/IQ007/resources/11k_hands-temp/Hand_0000002-down-right.png')
+    jp = ip.with_suffix('.json')
+
+    im = cv2.imread(str(ip), cv2.IMREAD_UNCHANGED)
+    with open(jp) as f:
+        data = json.load(f)
+    
+    for i, shape in enumerate(data['shapes']):
+        mask = np.zeros(im.shape[:2], dtype=np.uint8)
+        seg = shape['points']
+        poly_np = np.array(seg, dtype=np.int32).reshape(-1, 2)
+        cv2.fillPoly(mask, [poly_np], 255)
+
+        # Extract object using mask
+        extracted = cv2.bitwise_and(im, im, mask=mask)
+
+        # Add transparency using mask as alpha channel
+        transparent = np.zeros_like(im, dtype=np.uint8)
+        transparent[:, :, :3] = extracted[:, :, :3]  # Copy RGB channels
+        transparent[:, :, 3] = mask  # Use mask as alpha channel
+
+        # Find bounding box and crop
+        x, y, w, h = cv2.boundingRect(mask)
+        crop = transparent[y:y+h, x:x+w]
+
+        # make all bg white
+        crop = cv2.cvtColor(crop, cv2.COLOR_BGRA2RGBA)
+        crop = Image.fromarray(crop)
+        white_background = Image.new('RGB', crop.size, (255, 255, 255))
+        white_background.paste(crop, (0, 0), crop)
+        white_background.save('test.png')
+
+        # remask the finger
+        crop = white_background
+        crop = np.array(crop)
+        crop = crop[:, :, ::-1] # rgb2gbr
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        # Define mask for white background (tune if necessary)
+        lower_white = np.array([0, 0, 200], dtype=np.uint8)
+        upper_white = np.array([180, 50, 255], dtype=np.uint8)
+        mask = cv2.inRange(hsv, lower_white, upper_white)
+        # Invert mask to keep the hand
+        mask_inv = cv2.bitwise_not(mask)
+        # Find contours
+        contours, _ = cv2.findContours(mask_inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            print("No hand detected in the image.")
+            continue
+        hand_contour = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(hand_contour)
+        # Create an RGBA image with transparency
+        rgba = cv2.cvtColor(crop, cv2.COLOR_BGR2BGRA)
+        # Set alpha channel using the mask
+        rgba[:, :, 3] = mask_inv
+        finger_crop = rgba[y:y+h, x:x+w]
+
+        cv2.imwrite(f'finger_{i}.png', finger_crop)
+        print(f'done finger {i}')
+
+
+
+
 
 if __name__ == '__main__':
     pass
-    # nothing()
+    nothing()
     # ElevenkHands.get_hand_roi_images()
     # EgoHand.get_labels()
     # EgoHand.get_hand_images()
     # COCO.get_object_images()
     # segment_fingers()
-    filter_coco_objects()
+    # filter_coco_objects()
