@@ -62,14 +62,14 @@ def iou_bbox(boxA, boxB):
     return r1, r2, iou
 
 
-def resize_to_h(im: Image, new_h: int):
+def resize_to_height(im: Image, new_h: int):
     w, h = im.size
     new_w = int(w * new_h / h)
     im = im.resize((new_w, new_h))
     return im
 
 
-def resize_to_w(im: Image, new_w: int):
+def resize_to_width(im: Image, new_w: int):
     w, h = im.size
     new_h = int(h * new_w / w)
     im = im.resize((new_w, new_h))
@@ -130,3 +130,13 @@ def get_largest_foreground_region(img):
     # Get bounding box of the largest foreground region
     x, y, w, h = cv2.boundingRect(largest_contour)
     return (x, y, x+w, y+h)
+
+
+def check_overlap_with_existing_bbs(new_bb, existing_bbs):
+    is_valid = True
+    for cur_bb in existing_bbs:
+        r1, r2, iou = iou_bbox(new_bb, cur_bb)
+        if iou > 0:
+            is_valid = False
+            break
+    return is_valid

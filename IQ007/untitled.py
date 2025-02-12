@@ -230,7 +230,7 @@ class COCO:
             annotation_ids = coco.getAnnIds(imgIds=image_id)
             annotations = coco.loadAnns(annotation_ids)
 
-            for i, ann in enumerate(annotations):
+            for i, ann in enumerate(annotations): # for each object
                 try:
                     if "segmentation" not in ann or not ann["segmentation"]:
                         continue
@@ -377,96 +377,34 @@ def segment_fingers():
             print('ERROR: ', e)
             continue
 
-def segment_and_crop_fingers(image_path, output_folder="fingers_output"):
-    # Load image with alpha channel (RGBA)
-    img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
 
-    # Ensure image has an alpha channel
-    if img.shape[2] != 4:
-        raise ValueError("Image does not have an alpha channel!")
-
-    # Extract the alpha channel (hand mask)
-    hand_mask = img[:, :, 3]
-
-    # Convert mask to binary
-    _, binary = cv2.threshold(hand_mask, 128, 255, cv2.THRESH_BINARY)
-
-    # Find contours of the hand
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        raise ValueError("No hand contour found!")
-
-    hand_contour = max(contours, key=cv2.contourArea)  # Get the largest contour (hand)
-
-    # Find convex hull and defects
-    hull = cv2.convexHull(hand_contour, returnPoints=False)
-    defects = cv2.convexityDefects(hand_contour, hull)
-
-    if defects is None:
-        raise ValueError("No convexity defects found. Ensure fingers are separated!")
-
-    # Prepare an output directory
-    os.makedirs(output_folder, exist_ok=True)
-
-    # Extract finger segments using convexity defects
-    finger_masks = np.zeros_like(binary)
-    finger_contours = []
-
-    for i in range(defects.shape[0]):
-        start_idx, end_idx, far_idx, _ = defects[i, 0]
-        start = tuple(hand_contour[start_idx][0])
-        end = tuple(hand_contour[end_idx][0])
-        far = tuple(hand_contour[far_idx][0])
-
-        # Filtering defects (only consider wide gaps)
-        if cv2.norm(np.array(start) - np.array(far)) > 20 and cv2.norm(np.array(end) - np.array(far)) > 20:
-            # Create a new mask for the individual finger
-            single_finger_mask = np.zeros_like(binary)
-
-            # Draw filled contour of the hand
-            cv2.drawContours(single_finger_mask, [hand_contour], -1, 255, thickness=cv2.FILLED)
-
-            # Block out the region below the finger (to isolate it)
-            cv2.line(single_finger_mask, start, end, 0, thickness=20)
-
-            # Find contours in this new mask (extract just one finger)
-            finger_contour, _ = cv2.findContours(single_finger_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if finger_contour:
-                finger_contours.append(max(finger_contour, key=cv2.contourArea))  # Get largest finger contour
-
-    # Process each detected finger
-    for idx, finger_contour in enumerate(finger_contours):
-        # Create a mask for this specific finger
-        finger_mask = np.zeros_like(binary)
-        cv2.drawContours(finger_mask, [finger_contour], -1, 255, thickness=cv2.FILLED)
-
-        # Extract the specific finger region
-        finger_only = cv2.bitwise_and(img, img, mask=finger_mask)
-
-        # Get bounding box of the finger
-        x, y, w, h = cv2.boundingRect(finger_contour)
-
-        # Crop to bounding box
-        cropped_finger = finger_only[y:y+h, x:x+w]
-
-        # Save the cropped finger with transparency
-        output_filename = os.path.join(output_folder, f"finger_{idx+1}.png")
-        cv2.imwrite(output_filename, cropped_finger)
-
-        print(f"Saved {output_filename}")
-
-    print("Finger segmentation completed!")
-
-
-
-def nothing():
+def filter_coco_objects():
     dir = 'resources/coco2017/coco_objects'
     ipaths = list(Path(dir).glob('*'))
-    for _ in range(100): np.random.shuffle(ipaths)
-    for ip in ipaths[:100]:
-        shutil.copy(ip, 'resources/coco2017/coco_objects_temp')
-        print(f'done {ip}')
-    
+    cnt = 0
+    for ip in ipaths:
+        # if '000000270402-elephant-1' not in ip.name: continue
+        im = Image.open(ip).convert('RGBA')
+        w, h = im.size
+        removed = False
+        if max(w/h, h/w) >= 5:
+            removed = True
+        if min(w, h) < 50:
+            removed = True
+        im_arr = np.array(im)
+        alpha_channel = im_arr[:, :, 3]
+        _, binary = cv2.threshold(alpha_channel, 128, 255, cv2.THRESH_BINARY)
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if len(contours) != 1:
+            removed = True
+        
+        if removed:
+            os.remove(ip)
+            print(f'removed {ip}')
+            cnt += 1
+    print(f'removed {cnt} images')
+
+
 
 if __name__ == '__main__':
     pass
@@ -475,4 +413,5 @@ if __name__ == '__main__':
     # EgoHand.get_labels()
     # EgoHand.get_hand_images()
     # COCO.get_object_images()
-    segment_fingers()
+    # segment_fingers()
+    filter_coco_objects()
